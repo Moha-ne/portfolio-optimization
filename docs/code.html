@@ -1,0 +1,769 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Python code - Serenity & Velocity</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="css/reset.css">
+    <link rel="stylesheet" href="css/customize.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/monokai.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script>document.addEventListener('DOMContentLoaded', function () { hljs.highlightAll(); });</script>
+  </head>
+
+  <body class="report">
+    <a class="logo2" href="index.html" title="Home"></a>
+    <main>
+      <h1>Python code</h1>
+      <p>The scripts used for the two funds. Folder 1 is Serenity, folder 2 is Velocity. The scripts are the
+      same for both funds except for the asset lists, the z-score weights, the news tickers and the gauge value.</p>
+      <a class="button" href="#fund1">Serenity scripts</a>
+      <a class="button" href="#fund2">Velocity scripts</a>
+      <a class="button" href="report.html">Back to the report</a>
+      <h2 id="fund1">Serenity Fund</h2>
+      <h3 id="s1-1">1.py <a class="note" href="https://github.com/Moha-ne/portfolio-optimization/blob/main/docs/scripts/1/1.py">(GitHub)</a></h3>
+      <p class="note">Prices, returns, Markowitz simulation, efficient frontier, risk contribution and Value at Risk. Writes the seven charts.</p>
+      <pre><code class="language-python">from pathlib import Path
+import numpy as np
+import pandas as pd
+import yfinance as yf
+import plotly.graph_objects as go
+import scipy.stats as stats
+import par84
+
+images = Path(par84.img_path)
+name = &quot;markovar-&quot;
+
+symbols = [&quot;SHY&quot;, &quot;GLD&quot;, &quot;KO&quot;, &quot;CBOE&quot;, &quot;MO&quot;, &quot;DBA&quot;, &quot;DBMF&quot;, &quot;TIP&quot;, &quot;VCSH&quot;, &quot;PM&quot;, &quot;TRV&quot;, &quot;MUB&quot;, &quot;MNA&quot;, &quot;LLY&quot;, &quot;ABBV&quot;, &quot;IBM&quot;, &quot;WMT&quot;, &quot;IEF&quot;, &quot;JNJ&quot;, &quot;V&quot;, &quot;AEP&quot;, &quot;ALL&quot;, &quot;AAPL&quot;, &quot;NDAQ&quot;, &quot;MSFT&quot;]
+symbols = sorted(symbols)
+df = yf.Tickers(symbols).history(period=&#x27;3y&#x27;, auto_adjust=True)[&#x27;Close&#x27;]
+df = df.tz_localize(None)
+
+print(f&quot;\n==== Basis 100 ====&quot;)
+df100 = df / df.iloc[0] * 100
+print(df100)
+
+fig = go.Figure(layout=par84.layout)
+for i in symbols:
+    fig.add_scatter(x=df100.index, y=df100[i], name=i)
+fig.write_html(images / f&quot;{name}1.html&quot;, config=par84.config)
+
+print(f&quot;\n==== Daily returns ====&quot;)
+daily_returns = np.log(df/ df.shift(1)).dropna()
+print(daily_returns.map(lambda x: f&quot;{x:.2%}&quot;))
+
+fig = go.Figure(layout=par84.layout)
+for i in symbols:
+    fig.add_scatter(x=daily_returns.index, y=daily_returns[i], name=i)
+fig.write_html(images / f&quot;{name}2.html&quot;, config=par84.config)
+
+fig = go.Figure(layout=par84.layout)	
+for i in symbols:
+    fig.add_histogram(x=daily_returns[i], name=i)
+fig.write_html(images / f&quot;{name}3.html&quot;, config=par84.config)
+
+print(f&quot;\n==== Annual returns ====&quot;)
+mean_returns = daily_returns.mean() * 252
+print(mean_returns.map(lambda x: f&quot;{x:.2%}&quot;))
+
+print(f&quot;\n==== Covariance matrix ====&quot;)
+cov_matrix = daily_returns.cov() * 252
+print(cov_matrix.map(lambda x: f&quot;{x:.2%}&quot;))
+
+print(f&quot;\n==== Risk-free rate ====&quot;)
+rf_series = yf.Ticker(&#x27;^IRX&#x27;).history(period=&#x27;5d&#x27;)[&#x27;Close&#x27;]
+rf = rf_series.dropna().mean() / 100.0
+print(f&quot;{rf:.2%}&quot;)  
+
+np.random.seed(42)
+num_portfolios = 10_000
+results = np.zeros((num_portfolios, 3))
+weights_list = []
+tickers_list=[]
+for i in range(num_portfolios):
+    weights = np.random.random(len(symbols))
+    weights /= np.sum(weights)
+
+    w = pd.Series(weights, index=symbols)
+    port_return = float(w @ mean_returns)                 
+    port_volatility = float(np.sqrt(w @ cov_matrix @ w)) 
+    sharpe_ratio = (port_return - rf) / port_volatility
+
+    results[i, 0] = port_return
+    results[i, 1] = port_volatility
+    results[i, 2] = sharpe_ratio
+    
+    weights_list.append(weights)
+    tickers_list.append(symbols)
+
+results = pd.DataFrame(results, columns=[&#x27;Return&#x27;, &#x27;Volatility&#x27;, &#x27;Sharpe Ratio&#x27;])
+print(f&quot;==== {num_portfolios} results ====&quot;)
+print(results)
+
+print(f&quot;\n==== Max. Sharpe ratio ====&quot;)
+max_sharpe_idx = results[&#x27;Sharpe Ratio&#x27;].idxmax()
+max_sharpe_ratio = results.loc[max_sharpe_idx, &#x27;Sharpe Ratio&#x27;]
+print(f&quot;{max_sharpe_ratio:.2f}&quot;)
+
+print(f&quot;\n==== Best weights ====&quot;)
+best_weights = weights_list[max_sharpe_idx]
+best_weights_df = pd.DataFrame({
+    &#x27;Asset&#x27;: symbols,
+    &#x27;Weight&#x27;: best_weights
+})
+best_weights_df[&#x27;Weight&#x27;] = best_weights_df[&#x27;Weight&#x27;].map(lambda x: f&quot;{x:.2%}&quot;)
+print(best_weights_df)
+
+fig = go.Figure(layout=par84.layout)
+fig.add_pie(labels=symbols, values=best_weights, hole=.5, textposition=&#x27;inside&#x27;, textinfo=&#x27;label+percent&#x27;, marker=dict(colors=[par84.layout.colorway[symbols.index(s) % len(par84.layout.colorway)] for s in symbols]))
+fig.update_layout(title_text=&#x27;Optimal Portfolio Asset Allocation&#x27;, showlegend=True)
+fig.write_html(images / f&quot;{name}4.html&quot;, config=par84.config)
+
+print(f&quot;\n==== Optimal return ====&quot;)
+optimal_return = results.loc[max_sharpe_idx, &#x27;Return&#x27;]
+print(f&quot;{optimal_return:.2%}&quot;)
+
+print(f&quot;\n==== Optimal volatility====&quot;)
+optimal_volatility = results.loc[max_sharpe_idx, &#x27;Volatility&#x27;]
+print(f&quot;{optimal_volatility:.2%}&quot;)
+
+cml_x = np.linspace(0, max(results[&#x27;Volatility&#x27;]), 100)
+cml_y = rf + (optimal_return - rf) / optimal_volatility * cml_x
+
+optimal_weights_text = [f&#x27;{symbols[i]}: {best_weights[i]:.2f}&#x27; for i in range(len(symbols))]
+optimal_weights_string = &#x27;, &#x27;.join(optimal_weights_text)  
+
+fig = go.Figure(layout=par84.layout)
+fig.add_scatter(
+    x=results[&#x27;Volatility&#x27;], y=results[&#x27;Return&#x27;],
+    marker=dict(color=(results[&#x27;Return&#x27;] - rf)/(results[&#x27;Volatility&#x27;]), showscale=True, line=dict(width=1), colorscale=&quot;viridis&quot;, colorbar=dict(title=&quot;Sharpe&lt;br&gt;Ratio&quot;)), mode=&#x27;markers&#x27;,
+    text=[str(np.array(tickers_list[i])) + &quot;&lt;br&gt;&quot; + str(np.array(weights_list[i]).round(2)) for i in range(len(tickers_list))]
+)
+fig.add_scatter(x=[optimal_volatility], y=[optimal_return], mode=&#x27;markers&#x27;, marker=dict(color=&#x27;greenyellow&#x27;), text=optimal_weights_string)
+fig.update_layout(title=&#x27;Efficient Frontier&#x27;, xaxis_title=&#x27;Volatility&#x27;, yaxis_title=&#x27;Return&#x27;, showlegend=False)
+fig.write_html(images / f&quot;{name}5a.html&quot;, config=par84.config)
+fig.add_scatter(x=cml_x, y=cml_y)
+fig.write_html(images / f&quot;{name}5b.html&quot;, config=par84.config)
+
+w_best = pd.Series(best_weights, index=symbols)
+marginal_contribution = cov_matrix @ w_best
+risk_contribution = w_best * marginal_contribution
+percent_contribution = risk_contribution / (optimal_volatility**2)
+
+fig = go.Figure(layout=par84.layout)
+fig.add_bar(x=symbols, y=percent_contribution.values, name=&#x27;Risk Contribution&#x27;)
+fig.update_layout(title=&#x27;Contribution to Portfolio Risk&#x27;, xaxis_title=&#x27;Assets&#x27;, yaxis_title=&#x27;Percentage of Total Risk&#x27;)
+fig.write_html(images / f&quot;{name}6.html&quot;, config=par84.config)
+
+risk_contrib_table = pd.DataFrame({
+    &#x27;Asset&#x27;: symbols,
+    &#x27;Weight&#x27;: w_best.values,
+    &#x27;Risk Contribution&#x27;: percent_contribution.values
+})
+print(f&quot;\n==== Contribution to risk ====&quot;)
+risk_contrib_table[&#x27;Weight&#x27;] = risk_contrib_table[&#x27;Weight&#x27;].map(lambda x: f&quot;{x:.2%}&quot;)
+risk_contrib_table[&#x27;Risk Contribution&#x27;] = risk_contrib_table[&#x27;Risk Contribution&#x27;].map(lambda x: f&quot;{x:.2%}&quot;)
+print(risk_contrib_table)
+
+print(&quot;\n==== Value at Risk ====&quot;)
+investment = 2_000_000_000
+conf_level = 0.99
+
+optimal_return_d = optimal_return / 252
+optimal_volatility_d = optimal_volatility / np.sqrt(252)
+
+mean_val_1d = investment * (1 + optimal_return_d)
+std_val_1d  = investment * optimal_volatility_d
+cutoff = stats.norm.ppf(1 - conf_level, mean_val_1d, std_val_1d)
+var_1d = investment - cutoff
+print(&quot;Value at Risk of the portfolio after 1 day : &quot; + str(var_1d))
+
+var_array = []
+horizon = 10
+for t in range(1, horizon+1):
+    mean_val_t = investment * (1 + optimal_return_d * t)
+    std_val_t  = investment * (optimal_volatility_d * np.sqrt(t))
+    cutoff_t = stats.norm.ppf(1 - conf_level, mean_val_t, std_val_t)
+    var_array.append(np.round(investment - cutoff_t, 2))
+    print(str(t) + &quot; day(s) : &quot; + str(np.round(investment - cutoff_t, 2)))
+
+fig = go.Figure(layout=par84.layout)
+fig.add_scatter(y = var_array)
+fig.update_layout(
+    title=&quot;Maximal loss after 10 days&quot;,
+    xaxis_title=&quot;Days&quot;,
+    yaxis_title=&quot;$&quot;)
+fig.write_html(images / f&quot;{name}7.html&quot;, config=par84.config)
+</code></pre>
+      <h3 id="s1-2">2.py <a class="note" href="https://github.com/Moha-ne/portfolio-optimization/blob/main/docs/scripts/1/2.py">(GitHub)</a></h3>
+      <p class="note">Momentum, volatility, beta and composite z-score of each asset.</p>
+      <pre><code class="language-python">import numpy as np
+import pandas as pd
+import yfinance as yf
+
+tickers = [&quot;SHY&quot;, &quot;GLD&quot;, &quot;KO&quot;, &quot;CBOE&quot;, &quot;MO&quot;, &quot;DBA&quot;, &quot;DBMF&quot;, &quot;TIP&quot;, &quot;VCSH&quot;, &quot;PM&quot;, &quot;TRV&quot;, &quot;MUB&quot;, &quot;MNA&quot;, &quot;LLY&quot;, &quot;ABBV&quot;, &quot;IBM&quot;, &quot;WMT&quot;, &quot;IEF&quot;, &quot;JNJ&quot;, &quot;V&quot;, &quot;AEP&quot;, &quot;ALL&quot;, &quot;AAPL&quot;, &quot;NDAQ&quot;, &quot;MSFT&quot;]
+
+benchmark = &quot;SPY&quot;
+
+data = yf.Tickers(tickers + [benchmark]).history(period=&quot;3y&quot;, auto_adjust=True)[&#x27;Close&#x27;]
+
+missing = [t for t in tickers + [benchmark] if t not in data.columns]
+if missing:
+    raise ValueError(f&quot;Missing data for: {missing}&quot;)
+
+prices = data[tickers]
+market = data[benchmark]
+
+returns = prices.pct_change().dropna()
+market_returns = market.pct_change().dropna()
+
+df = pd.DataFrame(index=tickers)
+
+df[&quot;momentum&quot;] = prices.shift(21).iloc[-1] / prices.shift(273).iloc[-1] - 1
+df[&quot;volatility&quot;] = returns.tail(252).std() * np.sqrt(252)
+
+betas = []
+
+for ticker in tickers:
+    concat_returns = pd.concat([returns[ticker], market_returns], axis=1).dropna().tail(252)
+    stock_ret = concat_returns.iloc[ : , 0]
+    bench_ret = concat_returns.iloc[ : , 1]
+
+    cov = np.cov(stock_ret, bench_ret, ddof=1)[0, 1]
+    var_bench = np.var(bench_ret, ddof=1)
+    beta = cov / var_bench
+
+    betas.append(beta)
+
+df[&quot;beta&quot;] = betas
+df = df.fillna(df.median(numeric_only=True))
+
+def zscore(series):
+    return (series - series.mean()) / series.std(ddof=0)
+
+df[&quot;z_momentum&quot;] = zscore(df[&quot;momentum&quot;])
+df[&quot;z_volatility&quot;] = zscore(df[&quot;volatility&quot;])
+df[&quot;z_beta&quot;] = zscore(df[&quot;beta&quot;])
+
+df[&quot;z_score&quot;] = (
+    0.5 * df[&quot;z_momentum&quot;]
+    - 0.3 * df[&quot;z_volatility&quot;]
+    - 0.2 * df[&quot;z_beta&quot;]
+)
+
+df = df.sort_values(&quot;z_score&quot;, ascending=False)
+
+print(df[[&quot;momentum&quot;, &quot;volatility&quot;, &quot;beta&quot;, &quot;z_momentum&quot;, &quot;z_volatility&quot;, &quot;z_beta&quot;, &quot;z_score&quot;]])
+</code></pre>
+      <h3 id="s1-3">3.py <a class="note" href="https://github.com/Moha-ne/portfolio-optimization/blob/main/docs/scripts/1/3.py">(GitHub)</a></h3>
+      <p class="note">Beta and alpha against the S&amp;P 500.</p>
+      <pre><code class="language-python">import yfinance as yf
+import numpy as np
+
+tickers = [&quot;SHY&quot;, &quot;GLD&quot;, &quot;KO&quot;, &quot;CBOE&quot;, &quot;MO&quot;, &quot;DBA&quot;, &quot;DBMF&quot;, &quot;TIP&quot;, &quot;VCSH&quot;, &quot;PM&quot;, &quot;TRV&quot;, &quot;MUB&quot;, &quot;MNA&quot;, &quot;LLY&quot;, &quot;ABBV&quot;, &quot;IBM&quot;, &quot;WMT&quot;, &quot;IEF&quot;, &quot;JNJ&quot;, &quot;V&quot;, &quot;AEP&quot;, &quot;ALL&quot;, &quot;AAPL&quot;, &quot;NDAQ&quot;, &quot;MSFT&quot;]
+benchmark = &#x27;^GSPC&#x27;
+
+rf_annual = yf.Ticker(&#x27;^IRX&#x27;).history(period=&#x27;5d&#x27;)[&#x27;Close&#x27;].dropna().iloc[-1] / 100
+rf_daily = (1 + rf_annual)**(1/252) - 1
+
+df = yf.Tickers(tickers + [benchmark]).history(period=&#x27;3y&#x27;, auto_adjust=True)[&#x27;Close&#x27;]
+
+daily_returns = df.pct_change().dropna()
+portfolio_returns = daily_returns[tickers].mean(axis=1)   # equal-weight portfolio
+market_returns = daily_returns[benchmark]
+
+beta = portfolio_returns.cov(market_returns) / market_returns.var()
+alpha_daily = (portfolio_returns.mean() - rf_daily) - beta * (market_returns.mean() - rf_daily)
+alpha_annual = (1 + alpha_daily)**252 - 1
+
+print(f&quot;Portfolio Beta: {beta:.4f}&quot;)
+print(f&quot;Daily Alpha: {alpha_daily:.6%}&quot;)
+print(f&quot;Annualized Alpha: {alpha_annual:.2%}&quot;)
+</code></pre>
+      <h3 id="s1-4">4.py <a class="note" href="https://github.com/Moha-ne/portfolio-optimization/blob/main/docs/scripts/1/4.py">(GitHub)</a></h3>
+      <p class="note">Latest news on the three largest positions.</p>
+      <pre><code class="language-python">from pathlib import Path
+import yfinance as yf
+import par84
+
+images = Path(par84.img_path)
+name = &quot;news-&quot;
+
+tickers = [&quot;CBOE&quot;, &quot;KO&quot;, &quot;MO&quot;]
+n = 3
+html = &quot;&quot;
+
+for ticker in tickers:
+    news = yf.Search(ticker, news_count=n).news
+    links = &quot;&quot;
+
+    for x in news[:n]:
+        link = x.get(&quot;link&quot;, &quot;&quot;)
+        title = x.get(&quot;title&quot;, &quot;&quot;)
+        links += f&#x27;&lt;li&gt;&lt;a href=&quot;{link}&quot; target=&quot;_blank&quot; style=&quot;color:white&quot;&gt;{title}&lt;/a&gt;&lt;/li&gt;&#x27;
+
+    html += f&quot;&lt;h2&gt;{ticker}&lt;/h2&gt;&lt;ul&gt;{links}&lt;/ul&gt;&quot;
+
+(images / f&quot;{name}1.html&quot;).write_text(
+    f&#x27;&lt;body style=&quot;background:rgb(40,40,40);color:white;font-family:sans-serif&quot;&gt;{html}&lt;/body&gt;&#x27;,
+    encoding=&quot;utf-8&quot;
+)
+</code></pre>
+      <h3 id="s1-gauge">gauge.py <a class="note" href="https://github.com/Moha-ne/portfolio-optimization/blob/main/docs/scripts/1/gauge.py">(GitHub)</a></h3>
+      <p class="note">Volatility gauge shown on the home page.</p>
+      <pre><code class="language-python">from pathlib import Path
+import par84
+import plotly.graph_objects as go
+
+images = Path(par84.img_path)
+name = &quot;gauge-&quot;
+
+value = 8.40
+minvalue = 0
+maxvalue = 30
+reference = 14.87
+
+fig = go.Figure(layout=par84.layout)
+
+fig.add_indicator(
+    mode=&quot;gauge+number+delta&quot;,
+    value=value,
+    domain={&#x27;x&#x27;: [0, 1], &#x27;y&#x27;: [0, 1]},
+    delta={
+        &#x27;reference&#x27;: reference,
+        &#x27;increasing&#x27;: {&#x27;color&#x27;: &#x27;#f92672&#x27;}
+    },
+    gauge={
+        &#x27;axis&#x27;: {
+            &#x27;range&#x27;: [None, maxvalue],
+            &#x27;tickwidth&#x27;: 1,
+            &#x27;tickcolor&#x27;: &#x27;#aaaaaa&#x27;
+        },
+        &#x27;bar&#x27;: {&#x27;color&#x27;: &#x27;#7b2cff&#x27;},
+        &#x27;bgcolor&#x27;: &#x27;rgba(10, 10, 20, 1)&#x27;,
+        &#x27;borderwidth&#x27;: 3,
+        &#x27;bordercolor&#x27;: &#x27;rgba(123, 44, 255, 0.8)&#x27;,
+        &#x27;steps&#x27;: [
+            {&#x27;range&#x27;: [minvalue, maxvalue * 0.6], &#x27;color&#x27;: &#x27;rgba(123, 44, 255, 0.10)&#x27;},
+            {&#x27;range&#x27;: [maxvalue * 0.6, maxvalue * 0.85], &#x27;color&#x27;: &#x27;rgba(123, 44, 255, 0.25)&#x27;},
+            {&#x27;range&#x27;: [maxvalue * 0.85, maxvalue], &#x27;color&#x27;: &#x27;rgba(249, 38, 114, 0.5)&#x27;}
+        ],
+        &#x27;threshold&#x27;: {
+            &#x27;line&#x27;: {&#x27;color&#x27;: &#x27;#ff2cff&#x27;, &#x27;width&#x27;: 6},
+            &#x27;thickness&#x27;: 0.8,
+            &#x27;value&#x27;: 490
+        }
+    }
+)
+
+fig.update_layout(
+    paper_bgcolor=&#x27;rgba(0,0,0,0)&#x27;,
+    plot_bgcolor=&#x27;rgba(0,0,0,0)&#x27;,
+    font={&#x27;color&#x27;: &#x27;rgb(40,40,40)&#x27;, &#x27;family&#x27;: &#x27;Helvetica&#x27;}
+)
+
+fig.write_html(images / f&quot;{name}1.html&quot;, config=par84.config)
+</code></pre>
+      <h3 id="s1-par84">par84.py <a class="note" href="https://github.com/Moha-ne/portfolio-optimization/blob/main/docs/scripts/1/par84.py">(GitHub)</a></h3>
+      <p class="note">Chart style shared by all scripts, and the folder where charts are saved.</p>
+      <pre><code class="language-python">import plotly.graph_objects as go
+import plotly.colors as pc
+from pathlib import Path
+
+folder = Path(__file__).resolve().parent
+img_path = folder / &quot;../../img/1&quot;
+
+layout=go.Layout(
+    template=&quot;plotly_dark&quot;,
+    title_yanchor = &quot;top&quot;,
+        title=dict(
+        yanchor=&quot;top&quot;
+    ),
+    colorway=pc.qualitative.Plotly + pc.qualitative.Dark24,
+    autosize=True,
+    margin=dict(l=0, r=0, b=60, t=40, pad=0),
+    paper_bgcolor=&#x27;rgb(40,40,40)&#x27;,
+    plot_bgcolor=&#x27;rgb(40,40,40)&#x27;
+)
+
+config = {
+    &#x27;displayModeBar&#x27;: False,
+    &#x27;scrollZoom&#x27;: True
+}
+</code></pre>
+      <h2 id="fund2">Velocity Fund</h2>
+      <h3 id="s2-1">1.py <a class="note" href="https://github.com/Moha-ne/portfolio-optimization/blob/main/docs/scripts/2/1.py">(GitHub)</a></h3>
+      <p class="note">Prices, returns, Markowitz simulation, efficient frontier, risk contribution and Value at Risk. Writes the seven charts.</p>
+      <pre><code class="language-python">from pathlib import Path
+import numpy as np
+import pandas as pd
+import yfinance as yf
+import plotly.graph_objects as go
+import scipy.stats as stats
+import par84
+
+images = Path(par84.img_path)
+name = &quot;markovar-&quot;
+
+symbols = [&quot;PGR&quot;, &quot;LLY&quot;, &quot;JPM&quot;, &quot;MU&quot;, &quot;BRK-B&quot;, &quot;RTX&quot;, &quot;PLTR&quot;, &quot;CVNA&quot;, &quot;GE&quot;, &quot;TMUS&quot;, &quot;WMT&quot;, &quot;CRWD&quot;, &quot;GOOGL&quot;, &quot;TSM&quot;, &quot;IBKR&quot;, &quot;AAPL&quot;, &quot;GS&quot;, &quot;PWR&quot;, &quot;SPOT&quot;, &quot;NVDA&quot;, &quot;COST&quot;, &quot;RCL&quot;, &quot;GLD&quot;, &quot;GDX&quot;, &quot;NEM&quot;]
+symbols = sorted(symbols)
+df = yf.Tickers(symbols).history(period=&#x27;3y&#x27;, auto_adjust=True)[&#x27;Close&#x27;]
+df = df.tz_localize(None)
+
+print(f&quot;\n==== Basis 100 ====&quot;)
+df100 = df / df.iloc[0] * 100
+print(df100)
+
+fig = go.Figure(layout=par84.layout)
+for i in symbols:
+    fig.add_scatter(x=df100.index, y=df100[i], name=i)
+fig.write_html(images / f&quot;{name}1.html&quot;, config=par84.config)
+
+print(f&quot;\n==== Daily returns ====&quot;)
+daily_returns = np.log(df/ df.shift(1)).dropna()
+print(daily_returns.map(lambda x: f&quot;{x:.2%}&quot;))
+
+fig = go.Figure(layout=par84.layout)
+for i in symbols:
+    fig.add_scatter(x=daily_returns.index, y=daily_returns[i], name=i)
+fig.write_html(images / f&quot;{name}2.html&quot;, config=par84.config)
+
+fig = go.Figure(layout=par84.layout)	
+for i in symbols:
+    fig.add_histogram(x=daily_returns[i], name=i)
+fig.write_html(images / f&quot;{name}3.html&quot;, config=par84.config)
+
+print(f&quot;\n==== Annual returns ====&quot;)
+mean_returns = daily_returns.mean() * 252
+print(mean_returns.map(lambda x: f&quot;{x:.2%}&quot;))
+
+print(f&quot;\n==== Covariance matrix ====&quot;)
+cov_matrix = daily_returns.cov() * 252
+print(cov_matrix.map(lambda x: f&quot;{x:.2%}&quot;))
+
+print(f&quot;\n==== Risk-free rate ====&quot;)
+rf_series = yf.Ticker(&#x27;^IRX&#x27;).history(period=&#x27;5d&#x27;)[&#x27;Close&#x27;]
+rf = rf_series.dropna().mean() / 100.0
+print(f&quot;{rf:.2%}&quot;)  
+
+np.random.seed(42)
+num_portfolios = 10_000
+results = np.zeros((num_portfolios, 3))
+weights_list = []
+tickers_list=[]
+for i in range(num_portfolios):
+    weights = np.random.random(len(symbols))
+    weights /= np.sum(weights)
+
+    w = pd.Series(weights, index=symbols)
+    port_return = float(w @ mean_returns)                 
+    port_volatility = float(np.sqrt(w @ cov_matrix @ w)) 
+    sharpe_ratio = (port_return - rf) / port_volatility
+
+    results[i, 0] = port_return
+    results[i, 1] = port_volatility
+    results[i, 2] = sharpe_ratio
+    
+    weights_list.append(weights)
+    tickers_list.append(symbols)
+
+results = pd.DataFrame(results, columns=[&#x27;Return&#x27;, &#x27;Volatility&#x27;, &#x27;Sharpe Ratio&#x27;])
+print(f&quot;==== {num_portfolios} results ====&quot;)
+print(results)
+
+print(f&quot;\n==== Max. Sharpe ratio ====&quot;)
+max_sharpe_idx = results[&#x27;Sharpe Ratio&#x27;].idxmax()
+max_sharpe_ratio = results.loc[max_sharpe_idx, &#x27;Sharpe Ratio&#x27;]
+print(f&quot;{max_sharpe_ratio:.2f}&quot;)
+
+print(f&quot;\n==== Best weights ====&quot;)
+best_weights = weights_list[max_sharpe_idx]
+best_weights_df = pd.DataFrame({
+    &#x27;Asset&#x27;: symbols,
+    &#x27;Weight&#x27;: best_weights
+})
+best_weights_df[&#x27;Weight&#x27;] = best_weights_df[&#x27;Weight&#x27;].map(lambda x: f&quot;{x:.2%}&quot;)
+print(best_weights_df)
+
+fig = go.Figure(layout=par84.layout)
+fig.add_pie(labels=symbols, values=best_weights, hole=.5, textposition=&#x27;inside&#x27;, textinfo=&#x27;label+percent&#x27;, marker=dict(colors=[par84.layout.colorway[symbols.index(s) % len(par84.layout.colorway)] for s in symbols]))
+fig.update_layout(title_text=&#x27;Optimal Portfolio Asset Allocation&#x27;, showlegend=True)
+fig.write_html(images / f&quot;{name}4.html&quot;, config=par84.config)
+
+print(f&quot;\n==== Optimal return ====&quot;)
+optimal_return = results.loc[max_sharpe_idx, &#x27;Return&#x27;]
+print(f&quot;{optimal_return:.2%}&quot;)
+
+print(f&quot;\n==== Optimal volatility====&quot;)
+optimal_volatility = results.loc[max_sharpe_idx, &#x27;Volatility&#x27;]
+print(f&quot;{optimal_volatility:.2%}&quot;)
+
+cml_x = np.linspace(0, max(results[&#x27;Volatility&#x27;]), 100)
+cml_y = rf + (optimal_return - rf) / optimal_volatility * cml_x
+
+optimal_weights_text = [f&#x27;{symbols[i]}: {best_weights[i]:.2f}&#x27; for i in range(len(symbols))]
+optimal_weights_string = &#x27;, &#x27;.join(optimal_weights_text)  
+
+fig = go.Figure(layout=par84.layout)
+fig.add_scatter(
+    x=results[&#x27;Volatility&#x27;], y=results[&#x27;Return&#x27;],
+    marker=dict(color=(results[&#x27;Return&#x27;] - rf)/(results[&#x27;Volatility&#x27;]), showscale=True, line=dict(width=1), colorscale=&quot;viridis&quot;, colorbar=dict(title=&quot;Sharpe&lt;br&gt;Ratio&quot;)), mode=&#x27;markers&#x27;,
+    text=[str(np.array(tickers_list[i])) + &quot;&lt;br&gt;&quot; + str(np.array(weights_list[i]).round(2)) for i in range(len(tickers_list))]
+)
+fig.add_scatter(x=[optimal_volatility], y=[optimal_return], mode=&#x27;markers&#x27;, marker=dict(color=&#x27;greenyellow&#x27;), text=optimal_weights_string)
+fig.update_layout(title=&#x27;Efficient Frontier&#x27;, xaxis_title=&#x27;Volatility&#x27;, yaxis_title=&#x27;Return&#x27;, showlegend=False)
+fig.write_html(images / f&quot;{name}5a.html&quot;, config=par84.config)
+fig.add_scatter(x=cml_x, y=cml_y)
+fig.write_html(images / f&quot;{name}5b.html&quot;, config=par84.config)
+
+w_best = pd.Series(best_weights, index=symbols)
+marginal_contribution = cov_matrix @ w_best
+risk_contribution = w_best * marginal_contribution
+percent_contribution = risk_contribution / (optimal_volatility**2)
+
+fig = go.Figure(layout=par84.layout)
+fig.add_bar(x=symbols, y=percent_contribution.values, name=&#x27;Risk Contribution&#x27;)
+fig.update_layout(title=&#x27;Contribution to Portfolio Risk&#x27;, xaxis_title=&#x27;Assets&#x27;, yaxis_title=&#x27;Percentage of Total Risk&#x27;)
+fig.write_html(images / f&quot;{name}6.html&quot;, config=par84.config)
+
+risk_contrib_table = pd.DataFrame({
+    &#x27;Asset&#x27;: symbols,
+    &#x27;Weight&#x27;: w_best.values,
+    &#x27;Risk Contribution&#x27;: percent_contribution.values
+})
+print(f&quot;\n==== Contribution to risk ====&quot;)
+risk_contrib_table[&#x27;Weight&#x27;] = risk_contrib_table[&#x27;Weight&#x27;].map(lambda x: f&quot;{x:.2%}&quot;)
+risk_contrib_table[&#x27;Risk Contribution&#x27;] = risk_contrib_table[&#x27;Risk Contribution&#x27;].map(lambda x: f&quot;{x:.2%}&quot;)
+print(risk_contrib_table)
+
+print(&quot;\n==== Value at Risk ====&quot;)
+investment = 2_000_000_000
+conf_level = 0.99
+
+optimal_return_d = optimal_return / 252
+optimal_volatility_d = optimal_volatility / np.sqrt(252)
+
+mean_val_1d = investment * (1 + optimal_return_d)
+std_val_1d  = investment * optimal_volatility_d
+cutoff = stats.norm.ppf(1 - conf_level, mean_val_1d, std_val_1d)
+var_1d = investment - cutoff
+print(&quot;Value at Risk of the portfolio after 1 day : &quot; + str(var_1d))
+
+var_array = []
+horizon = 10
+for t in range(1, horizon+1):
+    mean_val_t = investment * (1 + optimal_return_d * t)
+    std_val_t  = investment * (optimal_volatility_d * np.sqrt(t))
+    cutoff_t = stats.norm.ppf(1 - conf_level, mean_val_t, std_val_t)
+    var_array.append(np.round(investment - cutoff_t, 2))
+    print(str(t) + &quot; day(s) : &quot; + str(np.round(investment - cutoff_t, 2)))
+
+fig = go.Figure(layout=par84.layout)
+fig.add_scatter(y = var_array)
+fig.update_layout(
+    title=&quot;Maximal loss after 10 days&quot;,
+    xaxis_title=&quot;Days&quot;,
+    yaxis_title=&quot;$&quot;)
+fig.write_html(images / f&quot;{name}7.html&quot;, config=par84.config)
+</code></pre>
+      <h3 id="s2-2">2.py <a class="note" href="https://github.com/Moha-ne/portfolio-optimization/blob/main/docs/scripts/2/2.py">(GitHub)</a></h3>
+      <p class="note">Momentum, volatility, beta and composite z-score of each asset.</p>
+      <pre><code class="language-python">import numpy as np
+import pandas as pd
+import yfinance as yf
+
+tickers = [&quot;PGR&quot;, &quot;LLY&quot;, &quot;JPM&quot;, &quot;MU&quot;, &quot;BRK-B&quot;, &quot;RTX&quot;, &quot;PLTR&quot;, &quot;CVNA&quot;, &quot;GE&quot;, &quot;TMUS&quot;, &quot;WMT&quot;, &quot;CRWD&quot;, &quot;GOOGL&quot;, &quot;TSM&quot;, &quot;IBKR&quot;, &quot;AAPL&quot;, &quot;GS&quot;, &quot;PWR&quot;, &quot;SPOT&quot;, &quot;NVDA&quot;, &quot;COST&quot;, &quot;RCL&quot;, &quot;GLD&quot;, &quot;GDX&quot;, &quot;NEM&quot;]
+
+benchmark = &quot;SPY&quot;
+
+data = yf.Tickers(tickers + [benchmark]).history(period=&quot;3y&quot;, auto_adjust=True)[&#x27;Close&#x27;]
+
+missing = [t for t in tickers + [benchmark] if t not in data.columns]
+if missing:
+    raise ValueError(f&quot;Missing data for: {missing}&quot;)
+
+prices = data[tickers]
+market = data[benchmark]
+
+returns = prices.pct_change().dropna()
+market_returns = market.pct_change().dropna()
+
+df = pd.DataFrame(index=tickers)
+
+df[&quot;momentum&quot;] = prices.shift(21).iloc[-1] / prices.shift(273).iloc[-1] - 1
+df[&quot;volatility&quot;] = returns.tail(252).std() * np.sqrt(252)
+
+betas = []
+
+for ticker in tickers:
+    concat_returns = pd.concat([returns[ticker], market_returns], axis=1).dropna().tail(252)
+    stock_ret = concat_returns.iloc[ : , 0]
+    bench_ret = concat_returns.iloc[ : , 1]
+
+    cov = np.cov(stock_ret, bench_ret, ddof=1)[0, 1]
+    var_bench = np.var(bench_ret, ddof=1)
+    beta = cov / var_bench
+
+    betas.append(beta)
+
+df[&quot;beta&quot;] = betas
+df = df.fillna(df.median(numeric_only=True))
+
+def zscore(series):
+    return (series - series.mean()) / series.std(ddof=0)
+
+df[&quot;z_momentum&quot;] = zscore(df[&quot;momentum&quot;])
+df[&quot;z_volatility&quot;] = zscore(df[&quot;volatility&quot;])
+df[&quot;z_beta&quot;] = zscore(df[&quot;beta&quot;])
+
+df[&quot;z_score&quot;] = (
+    0.6 * df[&quot;z_momentum&quot;]
+    - 0.2 * df[&quot;z_volatility&quot;]
+    - 0.2 * df[&quot;z_beta&quot;]
+)
+
+df = df.sort_values(&quot;z_score&quot;, ascending=False)
+
+print(df[[&quot;momentum&quot;, &quot;volatility&quot;, &quot;beta&quot;, &quot;z_momentum&quot;, &quot;z_volatility&quot;, &quot;z_beta&quot;, &quot;z_score&quot;]])
+</code></pre>
+      <h3 id="s2-3">3.py <a class="note" href="https://github.com/Moha-ne/portfolio-optimization/blob/main/docs/scripts/2/3.py">(GitHub)</a></h3>
+      <p class="note">Beta and alpha against the S&amp;P 500.</p>
+      <pre><code class="language-python">import yfinance as yf
+import numpy as np
+
+tickers = [&quot;PGR&quot;, &quot;LLY&quot;, &quot;JPM&quot;, &quot;MU&quot;, &quot;BRK-B&quot;, &quot;RTX&quot;, &quot;PLTR&quot;, &quot;CVNA&quot;, &quot;GE&quot;, &quot;TMUS&quot;, &quot;WMT&quot;, &quot;CRWD&quot;, &quot;GOOGL&quot;, &quot;TSM&quot;, &quot;IBKR&quot;, &quot;AAPL&quot;, &quot;GS&quot;, &quot;PWR&quot;, &quot;SPOT&quot;, &quot;NVDA&quot;, &quot;COST&quot;, &quot;RCL&quot;, &quot;GLD&quot;, &quot;GDX&quot;, &quot;NEM&quot;]
+benchmark = &#x27;^GSPC&#x27;
+
+rf_annual = yf.Ticker(&#x27;^IRX&#x27;).history(period=&#x27;5d&#x27;)[&#x27;Close&#x27;].dropna().iloc[-1] / 100
+rf_daily = (1 + rf_annual)**(1/252) - 1
+
+df = yf.Tickers(tickers + [benchmark]).history(period=&#x27;3y&#x27;, auto_adjust=True)[&#x27;Close&#x27;]
+
+daily_returns = df.pct_change().dropna()
+portfolio_returns = daily_returns[tickers].mean(axis=1)   # equal-weight portfolio
+market_returns = daily_returns[benchmark]
+
+beta = portfolio_returns.cov(market_returns) / market_returns.var()
+alpha_daily = (portfolio_returns.mean() - rf_daily) - beta * (market_returns.mean() - rf_daily)
+alpha_annual = (1 + alpha_daily)**252 - 1
+
+print(f&quot;Portfolio Beta: {beta:.4f}&quot;)
+print(f&quot;Daily Alpha: {alpha_daily:.6%}&quot;)
+print(f&quot;Annualized Alpha: {alpha_annual:.2%}&quot;)
+</code></pre>
+      <h3 id="s2-4">4.py <a class="note" href="https://github.com/Moha-ne/portfolio-optimization/blob/main/docs/scripts/2/4.py">(GitHub)</a></h3>
+      <p class="note">Latest news on the three largest positions.</p>
+      <pre><code class="language-python">from pathlib import Path
+import yfinance as yf
+import par84
+
+images = Path(par84.img_path)
+name = &quot;news-&quot;
+
+tickers = [&quot;WMT&quot;, &quot;COST&quot;, &quot;RTX&quot;]
+n = 3
+html = &quot;&quot;
+
+for ticker in tickers:
+    news = yf.Search(ticker, news_count=n).news
+    links = &quot;&quot;
+
+    for x in news[:n]:
+        link = x.get(&quot;link&quot;, &quot;&quot;)
+        title = x.get(&quot;title&quot;, &quot;&quot;)
+        links += f&#x27;&lt;li&gt;&lt;a href=&quot;{link}&quot; target=&quot;_blank&quot; style=&quot;color:white&quot;&gt;{title}&lt;/a&gt;&lt;/li&gt;&#x27;
+
+    html += f&quot;&lt;h2&gt;{ticker}&lt;/h2&gt;&lt;ul&gt;{links}&lt;/ul&gt;&quot;
+
+(images / f&quot;{name}1.html&quot;).write_text(
+    f&#x27;&lt;body style=&quot;background:rgb(40,40,40);color:white;font-family:sans-serif&quot;&gt;{html}&lt;/body&gt;&#x27;,
+    encoding=&quot;utf-8&quot;
+)
+</code></pre>
+      <h3 id="s2-gauge">gauge.py <a class="note" href="https://github.com/Moha-ne/portfolio-optimization/blob/main/docs/scripts/2/gauge.py">(GitHub)</a></h3>
+      <p class="note">Volatility gauge shown on the home page.</p>
+      <pre><code class="language-python">from pathlib import Path
+import par84
+import plotly.graph_objects as go
+
+images = Path(par84.img_path)
+name = &quot;gauge-&quot;
+
+value = 16.88
+minvalue = 0
+maxvalue = 30
+reference = 14.87
+
+fig = go.Figure(layout=par84.layout)
+
+fig.add_indicator(
+    mode=&quot;gauge+number+delta&quot;,
+    value=value,
+    domain={&#x27;x&#x27;: [0, 1], &#x27;y&#x27;: [0, 1]},
+    delta={
+        &#x27;reference&#x27;: reference,
+        &#x27;increasing&#x27;: {&#x27;color&#x27;: &#x27;#f92672&#x27;}
+    },
+    gauge={
+        &#x27;axis&#x27;: {
+            &#x27;range&#x27;: [None, maxvalue],
+            &#x27;tickwidth&#x27;: 1,
+            &#x27;tickcolor&#x27;: &#x27;#aaaaaa&#x27;
+        },
+        &#x27;bar&#x27;: {&#x27;color&#x27;: &#x27;#7b2cff&#x27;},
+        &#x27;bgcolor&#x27;: &#x27;rgba(10, 10, 20, 1)&#x27;,
+        &#x27;borderwidth&#x27;: 3,
+        &#x27;bordercolor&#x27;: &#x27;rgba(123, 44, 255, 0.8)&#x27;,
+        &#x27;steps&#x27;: [
+            {&#x27;range&#x27;: [minvalue, maxvalue * 0.6], &#x27;color&#x27;: &#x27;rgba(123, 44, 255, 0.10)&#x27;},
+            {&#x27;range&#x27;: [maxvalue * 0.6, maxvalue * 0.85], &#x27;color&#x27;: &#x27;rgba(123, 44, 255, 0.25)&#x27;},
+            {&#x27;range&#x27;: [maxvalue * 0.85, maxvalue], &#x27;color&#x27;: &#x27;rgba(249, 38, 114, 0.5)&#x27;}
+        ],
+        &#x27;threshold&#x27;: {
+            &#x27;line&#x27;: {&#x27;color&#x27;: &#x27;#ff2cff&#x27;, &#x27;width&#x27;: 6},
+            &#x27;thickness&#x27;: 0.8,
+            &#x27;value&#x27;: 490
+        }
+    }
+)
+
+fig.update_layout(
+    paper_bgcolor=&#x27;rgba(0,0,0,0)&#x27;,
+    plot_bgcolor=&#x27;rgba(0,0,0,0)&#x27;,
+    font={&#x27;color&#x27;: &#x27;rgb(40,40,40)&#x27;, &#x27;family&#x27;: &#x27;Helvetica&#x27;}
+)
+
+fig.write_html(images / f&quot;{name}1.html&quot;, config=par84.config)
+</code></pre>
+      <h3 id="s2-par84">par84.py <a class="note" href="https://github.com/Moha-ne/portfolio-optimization/blob/main/docs/scripts/2/par84.py">(GitHub)</a></h3>
+      <p class="note">Chart style shared by all scripts, and the folder where charts are saved.</p>
+      <pre><code class="language-python">import plotly.graph_objects as go
+import plotly.colors as pc
+from pathlib import Path
+
+folder = Path(__file__).resolve().parent
+img_path = folder / &quot;../../img/2&quot;
+
+layout=go.Layout(
+    template=&quot;plotly_dark&quot;,
+    title_yanchor = &quot;top&quot;,
+        title=dict(
+        yanchor=&quot;top&quot;
+    ),
+    colorway=pc.qualitative.Plotly + pc.qualitative.Dark24,
+    autosize=True,
+    margin=dict(l=0, r=0, b=60, t=40, pad=0),
+    paper_bgcolor=&#x27;rgb(40,40,40)&#x27;,
+    plot_bgcolor=&#x27;rgb(40,40,40)&#x27;
+)
+
+config = {
+    &#x27;displayModeBar&#x27;: False,
+    &#x27;scrollZoom&#x27;: True
+}
+</code></pre>
+
+    </main>
+  </body>
+</html>
